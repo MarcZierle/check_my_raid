@@ -9,4 +9,5 @@ services:
             - CHECK_ON_STARTUP=False
             - TRIGER_SCHEDULE_AT='12:00'
             - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+            - NTFY_URL=${NTFY_URL} 
         restart: unless-stopped
