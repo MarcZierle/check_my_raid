@@ -10,6 +10,10 @@ import datetime
 import pytz
 import os
 from dotenv import load_dotenv
+from loguru import logger
+
+logger.remove()
+logger.add(sys.stdout, colorize=True, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
 
 class Raid:
     def __init__(self, name, disks):
@@ -35,22 +39,22 @@ def parse_raid_file(file_path):
     while line_index < len(lines):
         line = lines[line_index].strip()
 
-        # Rechercher la ligne du RAID
+        # Search for RAID line
         raid_match = re.match(r'^(md\w+)\s*:\s*active\s+raid\d+\s+(.+)', line)
         if raid_match:
             raid = Raid(raid_match.group(1), raid_match.group(2).split())
 
-            # Passe à la ligne suivante pour les blocs et l'état
+            # Move to next line for blocks and state
             line_index += 1
             state_line = lines[line_index].strip()
 
-            # Récupère l'état des disques (ex: [UUUU] pour tous les disques en état)
+            # Get disk states (e.g., [UUUU] for all disks in working state)
             state_match = re.search(r'\[([U_]+)\]', state_line)
             if state_match:
                 total_disks = len(state_match.group(1))
                 good_disks = state_match.group(1).count("U")
 
-                # Vérifier l'état des disques
+                # Check disk states
                 if good_disks == total_disks:
                     raid.state_is_good()
                 else:
@@ -69,13 +73,13 @@ def send_discord_notification(url: str, message_object: Dict[str, Any]) -> bool:
     try:
         response = requests.post(url, json=message_object)
         response.raise_for_status()
-        print(f"Discord notification sent successfully, code {response.status_code}.")
+        logger.success("Discord notification sent successfully, code {}", response.status_code)
         return True
     except requests.exceptions.HTTPError as err:
-        print(f"Failed to send Discord notification: {err}")
+        logger.error("Failed to send Discord notification: {}", err)
         return False
     except Exception as err:
-        print(f"Unexpected error sending Discord notification: {err}")
+        logger.error("Unexpected error sending Discord notification: {}", err)
         return False
 
 def send_ntfy_notification(url: str, title: str, message: str, priority: str = "default", tags: list = None) -> bool:
@@ -93,13 +97,13 @@ def send_ntfy_notification(url: str, title: str, message: str, priority: str = "
                                headers=headers,
                                data=message)
         response.raise_for_status()
-        print(f"NTFY notification sent successfully, code {response.status_code}.")
+        logger.success("NTFY notification sent successfully, code {}", response.status_code)
         return True
     except requests.exceptions.HTTPError as err:
-        print(f"Failed to send NTFY notification: {err}")
+        logger.error("Failed to send NTFY notification: {}", err)
         return False
     except Exception as err:
-        print(f"Unexpected error sending NTFY notification: {err}")
+        logger.error("Unexpected error sending NTFY notification: {}", err)
         return False
 
 def discord_factory(raids):
@@ -208,9 +212,9 @@ def send_notifications(raids):
             notifications_sent.append("NTFY")
 
     if notifications_sent:
-        print(f"Notifications sent to: {', '.join(notifications_sent)}")
+        logger.info("Notifications sent to: {}", ", ".join(notifications_sent))
     else:
-        print("No notifications were sent. Check your endpoint configurations.")
+        logger.warning("No notifications were sent. Check your endpoint configurations.")
 
     return problem_detected
 
@@ -225,14 +229,14 @@ def main():
     problem_detected = send_notifications(raids)
 
     if problem_detected:
-        print("Anomalies detected in at least one raid array.")
+        logger.warning("Anomalies detected in at least one raid array.")
     else:
-        print("All Raids are OK.")
+        logger.info("All Raids are OK.")
 
 #######################################################################################
 # Start the script 1 time if the variable CHECK_ON_STARTUP is set to True
 if os.getenv('CHECK_ON_STARTUP') == "True":
-    print("Checking RAID on startup of the container")
+    logger.info("Checking RAID on startup of the container")
     main()
 
 # Get the timezone and the schedule time
@@ -243,9 +247,9 @@ trigerAt = os.getenv('TRIGER_SCHEDULE_AT', '12:00').replace('"', '').replace("'"
 tz = pytz.timezone(timezone)
 now = datetime.datetime.now(tz)
 
-print("Date and time is currently on the timezone",
-      timezone, ":", now.strftime("%Y-%m-%d %H:%M:%S"))
-print(f"Next raid check scheduled at {trigerAt} \n")
+logger.info("Date and time is currently on the timezone {}: {}", 
+           timezone, now.strftime("%Y-%m-%d %H:%M:%S"))
+logger.info("Next raid check scheduled at {}", trigerAt)
 
 # Schedule the script to run at a specific time
 schedule.every().day.at(trigerAt, timezone).do(main)
