@@ -1,7 +1,7 @@
 import re
 import sys
 from dataclasses import field
-from typing import Tuple
+from typing import Tuple, Dict, Any
 
 import requests
 import schedule
@@ -64,53 +64,70 @@ def parse_raid_file(file_path):
 
     return raids
 
-
-def send_discord_notification(url, message_object) -> None:
+def send_discord_notification(url: str, message_object: Dict[str, Any]) -> bool:
     """Send a message to a Discord Webhook."""
-    response = requests.post(url, json=message_object)
+    try:
+        response = requests.post(url, json=message_object)
+        response.raise_for_status()
+        print(f"Discord notification sent successfully, code {response.status_code}.")
+        return True
+    except requests.exceptions.HTTPError as err:
+        print(f"Failed to send Discord notification: {err}")
+        return False
+    except Exception as err:
+        print(f"Unexpected error sending Discord notification: {err}")
+        return False
+
+def send_ntfy_notification(url: str, title: str, message: str, priority: str = "default", tags: list = None) -> bool:
+    """Send a message to an NTFY topic."""
+    headers = {
+        "Title": title,
+        "Priority": priority,
+    }
+    
+    if tags:
+        headers["Tags"] = ",".join(tags)
 
     try:
+        response = requests.post(url, 
+                               headers=headers,
+                               data=message)
         response.raise_for_status()
-
+        print(f"NTFY notification sent successfully, code {response.status_code}.")
+        return True
     except requests.exceptions.HTTPError as err:
-        print(err)
-    else:
-        print(f"Payload delivered successfully, code {response.status_code}.")
-
+        print(f"Failed to send NTFY notification: {err}")
+        return False
+    except Exception as err:
+        print(f"Unexpected error sending NTFY notification: {err}")
+        return False
 
 def discord_factory(raids):
-    """Create a discord message from the match."""
-    # Create root message object
-    problem_detected = None
+    """Create a discord message from the RAID status."""
+    problem_detected = False
     message = {
         "content": "All Raids are good.\n---",
         "embeds": []
     }
 
-    # Check if matches is an empty list
     if not raids:
-        message["content"] += "No RAID disks found.\n---"
+        message["content"] = "No RAID disks found.\n---"
         return message, True
 
     for raid in raids:
-        # Create the embed object
         embed = {}
 
-        # Change the message according to the type
         if raid.state == "KO":
-            message["content"] = "A problem has been detected !\n---"
+            message["content"] = "A problem has been detected!\n---"
             embed["title"] = f"{raid.name} :x:"
-            embed["description"] = f"At least one disks is down"
+            embed["description"] = f"At least one disk is down"
             embed["color"] = 16063773
             problem_detected = True
-
-        elif raid.state == "OK":
+        else:
             embed["title"] = f"{raid.name} :white_check_mark:"
-            embed["description"] = "All disks are operational !"
+            embed["description"] = "All disks are operational!"
             embed["color"] = 3126294
-            problem_detected = False
 
-        # Add the information
         embed["fields"] = [
             {
                 "name": "RAID state",
@@ -131,40 +148,86 @@ def discord_factory(raids):
                 "inline": False
             })
 
-        # Add footer
         embed["footer"] = {
             "text": "CheckMyRaid report"
         }
-
-        # Add timestamp
         embed["timestamp"] = datetime.datetime.now().isoformat()
-
-        # Add the embed to the message
         message["embeds"].append(embed)
 
     return message, problem_detected
 
+def ntfy_factory(raids):
+    """Create NTFY message from the RAID status."""
+    problem_detected = False
+    message_parts = []
+    
+    if not raids:
+        return "No RAID disks found.", "warning", ["warning"], False
+    
+    for raid in raids:
+        raid_status = []
+        raid_status.append(f"RAID: {raid.name}")
+        raid_status.append(f"State: {raid.state}")
+        raid_status.append(f"Disks: {', '.join(raid.disks)}")
+        
+        if raid.disks_KO:
+            problem_detected = True
+            raid_status.append(f"Failed disks: {', '.join(raid.disks_KO)}")
+            
+        message_parts.append("\n".join(raid_status))
+    
+    full_message = "\n\n".join(message_parts)
+    
+    if problem_detected:
+        title = "RAID Problem Detected!"
+        priority = "high"
+        tags = ["warning", "raid", "error"]
+    else:
+        title = "RAID Status: All Systems Normal"
+        priority = "default"
+        tags = ["success", "raid"]
+        
+    return title, full_message, priority, tags, problem_detected
+
+def send_notifications(raids):
+    """Send notifications to all configured endpoints."""
+    discord_url = os.getenv('DISCORD_WEBHOOK_URL')
+    ntfy_url = os.getenv('NTFY_URL')
+    notifications_sent = []
+
+    # Send Discord notification if configured
+    if discord_url:
+        discord_message, problem_detected = discord_factory(raids)
+        if send_discord_notification(discord_url, discord_message):
+            notifications_sent.append("Discord")
+
+    # Send NTFY notification if configured
+    if ntfy_url:
+        title, message, priority, tags, problem_detected = ntfy_factory(raids)
+        if send_ntfy_notification(ntfy_url, title, message, priority, tags):
+            notifications_sent.append("NTFY")
+
+    if notifications_sent:
+        print(f"Notifications sent to: {', '.join(notifications_sent)}")
+    else:
+        print("No notifications were sent. Check your endpoint configurations.")
+
+    return problem_detected
 
 def main():
-
     # Variables
     mdstat_file = "/app/data/mdstat"
-    discord_url = os.getenv('DISCORD_WEBHOOK_URL')
 
     # Read the content of the mdstat file
     raids = parse_raid_file(mdstat_file)
 
-    # Generate the message
-    discord_message, problem_detected = discord_factory(raids)
+    # Send notifications and get problem status
+    problem_detected = send_notifications(raids)
 
     if problem_detected:
-        print("Anomalies detected at least on one raid array.")
+        print("Anomalies detected in at least one raid array.")
     else:
         print("All Raids are OK.")
-
-    # Send the notification
-    send_discord_notification(discord_url, discord_message)
-
 
 #######################################################################################
 # Start the script 1 time if the variable CHECK_ON_STARTUP is set to True

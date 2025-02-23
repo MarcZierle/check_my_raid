@@ -1,7 +1,7 @@
 # Check My RAID
 
-A simple docker container that checks the status of a RAID array made with [mdadm](https://fr.wikipedia.org/wiki/Mdadm)
-and sends a notification with Discord of the status.
+A simple docker container that checks the status of RAID arrays made with [mdadm](https://fr.wikipedia.org/wiki/Mdadm)
+and sends notifications about their status via Discord and/or NTFY.
 
 ## Usage
 
@@ -17,7 +17,9 @@ Make a copy of the `example.env` file:
 cp example.env .env
 ```
 
-Edit the `.env` file and set the `DISCORD_WEBHOOK_URL` variable with the URL of your Discord webhook.
+Edit the `.env` file and set either or both of:
+- `DISCORD_WEBHOOK_URL` with the URL of your Discord webhook
+- `NTFY_URL` with your NTFY topic URL (e.g., https://ntfy.sh/yourtopic)
 
 Then build the image with the following command:
 
@@ -39,36 +41,41 @@ services:
             - CHECK_ON_STARTUP=False
             - TRIGER_SCHEDULE_AT='12:00'
             - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+            - NTFY_URL=${NTFY_URL}
         restart: unless-stopped
 ```
 
-Remember to create a .env file with the following content:
+Remember to create a .env file with one or both of the following:
 
 ```env
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/REDACTED/REDACTED
+NTFY_URL=https://ntfy.sh/yourtopic
 ```
+
 ## Variables
 
 | Variable              | Description                                                      | Default |
-|-----------------------|------------------------------------------------------------------|---------|
-| `TZ`                  | Timezone                                                         | `UTC`   |
-| `CHECK_ON_STARTUP`    | Check the status of the RAID array when the container is started | `None`  |
-| `TRIGER_SCHEDULE_AT`  | Time to check the status of the RAID array (format: HH:MM)       | `12:00` |
-| `DISCORD_WEBHOOK_URL` | URL of the Discord webhook                                       | `None`  |
+|--------------------- |------------------------------------------------------------------|---------|
+| `TZ`                 | Timezone                                                          | `UTC`   |
+| `CHECK_ON_STARTUP`   | Check the status of the RAID array when the container is started | `None`  |
+| `TRIGER_SCHEDULE_AT` | Time to check the status of the RAID array (format: HH:MM)       | `12:00` |
+| `DISCORD_WEBHOOK_URL`| URL of the Discord webhook (optional)                            | `None`  |
+| `NTFY_URL`          | URL of your NTFY topic (optional)                                | `None`  |
+
 ## How it works
 
-The container is simply a python script that reads the file `/proc/mdstat` to check the status of the RAID array.
+The container runs a Python script that reads the file `/proc/mdstat` to check the status of RAID arrays.
 
 The script is made to check the status of multiple RAID arrays. For example, if you have two RAID arrays md0 and md1,
 check_my_raid will check the status of both.
 
 A single notification is sent for all the RAID arrays. The notification contains the detailed status of each RAID array.
 
-The script is checking the status of the RAID array by looking for the beacons `[UU]`.
+The script checks the status of the RAID array by looking for the beacons `[UU]`.
 If the status is `[UU]`, the RAID array is considered healthy,
 but if some "U" are replaced by "_", the RAID array is considered degraded.
 
-The notification is sent with Discord Webhook. The URL of the webhook is set with the variable `DISCORD_WEBHOOK_URL`.
+The notifications can be sent via Discord webhook and/or NTFY. The URLs are set with the variables `DISCORD_WEBHOOK_URL` and `NTFY_URL` respectively.
 
 The script is scheduled to run every day at a specific time set with the variable `TRIGER_SCHEDULE_AT`.
 
